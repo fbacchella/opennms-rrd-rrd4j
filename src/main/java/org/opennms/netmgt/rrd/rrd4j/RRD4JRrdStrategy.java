@@ -77,7 +77,7 @@ public class RRD4JRrdStrategy implements RrdStrategy<RrdDef,RrdDb> {
     private static final Logger LOG = LoggerFactory.getLogger(RRD4JRrdStrategy.class);
     private static final String BACKEND_FACTORY_PROPERTY = "org.rrd4j.core.RrdBackendFactory";
     private static final String DEFAULT_BACKEND_FACTORY = "FILE";
-    
+
     private final class GraphDefInformations {
         String type;
         String name;
@@ -453,7 +453,7 @@ public class RRD4JRrdStrategy implements RrdStrategy<RrdDef,RrdDb> {
             }
         }
     }
-    
+
     String nextArg(String arg) {
         if(! arg.startsWith("--")) {
             return null;
@@ -467,7 +467,7 @@ public class RRD4JRrdStrategy implements RrdStrategy<RrdDef,RrdDb> {
         }
         return arg;
     }
-    
+
     GraphDefInformations parseGraphDefElement(String line, int countArgs, boolean isData) {
         String[] token = line.split(":");
         GraphDefInformations info = new GraphDefInformations();
@@ -577,7 +577,7 @@ public class RRD4JRrdStrategy implements RrdStrategy<RrdDef,RrdDb> {
                 boolean logarithmic = parseStringNumber(arg, optName, i, Boolean.FALSE, "").booleanValue();
                 graphDef.setLogarithmic(logarithmic);
             }
-           else if("font".equals(optName)) {
+            else if("font".equals(optName)) {
                 String font = parseStringNumber(arg, optName, i, "", "--font must be followed by an argument");
                 processRrdFontArgument(graphDef, font);
             }
@@ -591,6 +591,22 @@ public class RRD4JRrdStrategy implements RrdStrategy<RrdDef,RrdDb> {
             }
             else if("rigid".equals(optName)) {
                 rigid = parseStringNumber(arg, optName, i, Boolean.FALSE, "").booleanValue();
+            }
+            else if("no-legend".equals(optName)) {
+                boolean noLegend = parseStringNumber(arg, optName, i, Boolean.FALSE, "").booleanValue();
+                graphDef.setNoLegend(noLegend);
+            }
+            else if("alt-autoscale".equals(optName)) {
+                boolean altAutoscale = parseStringNumber(arg, optName, i, Boolean.FALSE, "").booleanValue();
+                graphDef.setAltAutoscale(altAutoscale);
+            }
+            else if("alt-autoscale-max".equals(optName)) {
+                boolean altAutoscaleMax = parseStringNumber(arg, optName, i, Boolean.FALSE, "").booleanValue();
+                graphDef.setAltAutoscaleMax(altAutoscaleMax);
+            }
+            else if("alt-y-grid".equals(optName)) {
+                boolean altYGrid = parseStringNumber(arg, optName, i, Boolean.FALSE, "").booleanValue();
+                graphDef.setAltYGrid(altYGrid);
             }
             else if(arg.startsWith("DEF:")) {
                 GraphDefInformations infos = parseGraphDefElement(arg, 3, true);
@@ -637,13 +653,12 @@ public class RRD4JRrdStrategy implements RrdStrategy<RrdDef,RrdDb> {
                         graphDef.datasource(infos.name, infos.args[1], fd);
                     } catch (IOException e) {
                         throw new RuntimeException();
-                   }
+                    }
                     try {
                         db.close();
                     } catch (IOException e) {
                         throw new RuntimeException();
                     }
-                    
                 }
                 else {
                     String stepString = infos.opts.get("step");
@@ -700,7 +715,7 @@ public class RRD4JRrdStrategy implements RrdStrategy<RrdDef,RrdDb> {
                 //format = format.replaceAll("%%", "%");
                 //LOG.debug("gprint: oldformat = {} newformat = {}", print[2], format);
                 format = format.replaceAll("\\n", "\\\\l");
-                graphDef.print(print[0], ConsolFun.valueOf(print[1]), format);
+                graphDef.print(print[0], ConsolFun.valueOf(print[1]).getVariable(), format);
 
             } else if (arg.startsWith("COMMENT:")) {
                 String comments[] = tokenize(arg, ":", true);
@@ -731,16 +746,13 @@ public class RRD4JRrdStrategy implements RrdStrategy<RrdDef,RrdDb> {
             }
             // units-length
             // units
-            //alt-autoscale
             //alt-autoscale-min
-            //alt-autoscale-max
             //no-gridfit
             //x-grid
             //y-grid
-            //alt-y-grid
             // right-axis
             // right-axis-format
-            // no-legend
+            // 
             // force-rules-legend
             // legend-direction
             // imginfo
@@ -1055,7 +1067,7 @@ public class RRD4JRrdStrategy implements RrdStrategy<RrdDef,RrdDb> {
 
     protected void addVdefDs(RrdGraphDef graphDef, String sourceName, String[] rhs, double start, double end, Map<String,List<String>> defs) {
         if (rhs.length == 2) {
-            graphDef.datasource(sourceName, rhs[0], ConsolFun.valueOf(rhs[1]));
+            graphDef.datasource(sourceName, rhs[0], ConsolFun.valueOf(rhs[1]).getVariable());
         } else if (rhs.length == 3 && "PERCENT".equals(rhs[2])) {
             double pctRank = Double.valueOf(rhs[1]);
             Variable var = new Variable.PERCENTILE(pctRank);
