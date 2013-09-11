@@ -33,20 +33,25 @@ import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.lang.reflect.Constructor;
-import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Calendar;
 import java.util.Collection;
-import java.util.Deque;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
+import java.util.Set;
+import java.util.regex.Pattern;
 
+import org.opennms.netmgt.rrd.RrdDataSource;
+import org.opennms.netmgt.rrd.RrdGraphDetails;
+import org.opennms.netmgt.rrd.RrdStrategy;
+import org.opennms.netmgt.rrd.RrdUtils;
 import org.rrd4j.ConsolFun;
 import org.rrd4j.DsType;
 import org.rrd4j.core.FetchData;
@@ -57,11 +62,8 @@ import org.rrd4j.core.timespec.TimeParser;
 import org.rrd4j.data.Plottable;
 import org.rrd4j.data.Variable;
 import org.rrd4j.graph.RrdGraph;
+import org.rrd4j.graph.RrdGraphConstants;
 import org.rrd4j.graph.RrdGraphDef;
-import org.opennms.netmgt.rrd.RrdDataSource;
-import org.opennms.netmgt.rrd.RrdGraphDetails;
-import org.opennms.netmgt.rrd.RrdStrategy;
-import org.opennms.netmgt.rrd.RrdUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -78,6 +80,13 @@ public class RRD4JRrdStrategy implements RrdStrategy<RrdDef,RrdDb> {
     private static final Logger LOG = LoggerFactory.getLogger(RRD4JRrdStrategy.class);
     private static final String BACKEND_FACTORY_PROPERTY = "org.rrd4j.core.RrdBackendFactory";
     private static final String DEFAULT_BACKEND_FACTORY = "FILE";
+    private static final Set<String> COLORNAMES = new HashSet<String>(RrdGraphConstants.COLOR_NAMES.length);
+    private static final String FLOATINGPOINTPATTERN = "[0-9]*\\.?[0-9]+([eE][-+]?[0-9]+)?";  // see http://www.regular-expressions.info/floatingpoint.html, removed the [+-]?
+    private static final Pattern LINEPATTERN = Pattern.compile("LINE(" + FLOATINGPOINTPATTERN + "):");
+    
+    static {
+        COLORNAMES.addAll(Arrays.asList(RrdGraphConstants.COLOR_NAMES));
+    }
 
     final class GraphDefInformations {
         String type;
@@ -93,35 +102,6 @@ public class RRD4JRrdStrategy implements RrdStrategy<RrdDef,RrdDb> {
     private static boolean s_initialized = false;
 
     private Properties m_configurationProperties;
-
-    /**
-     * An extremely simple Plottable for holding static datasources that
-     * can't be represented with an SDEF -- currently used only for PERCENT
-     * pseudo-VDEFs
-     *
-     * @author jeffg
-     *
-     */
-    class ConstantStaticDef extends Plottable {
-        private double m_startTime = Double.NEGATIVE_INFINITY;
-        private double m_endTime = Double.POSITIVE_INFINITY;
-        private double m_value = Double.NaN;
-
-        ConstantStaticDef(long startTime, long endTime, double value) {
-            m_startTime = startTime;
-            m_endTime = endTime;
-            m_value = value;
-        }
-
-        @Override
-        public double getValue(long timestamp) {
-            if (m_startTime <= timestamp && m_endTime >= timestamp) {
-                return m_value;
-            } else {
-                return Double.NaN;
-            }
-        }
-    }
 
     /**
      * <p>getConfigurationProperties</p>
@@ -153,7 +133,7 @@ public class RRD4JRrdStrategy implements RrdStrategy<RrdDef,RrdDb> {
     }
 
     /**
-     * Closes the JRobin RrdDb.
+     * Closes the RRD4J RrdDb.
      *
      * @param rrdFile a {@link org.jrobin.core.RrdDb} object.
      * @throws java.lang.Exception if any.
@@ -265,7 +245,7 @@ public class RRD4JRrdStrategy implements RrdStrategy<RrdDef,RrdDb> {
     /**
      * {@inheritDoc}
      *
-     * Fetch the last value from the JRobin RrdDb file.
+     * Fetch the last value from the RRD4J RrdDb file.
      */
     @Override
     public Double fetchLastValue(final String fileName, final String ds, final int interval) throws NumberFormatException, org.opennms.netmgt.rrd.RrdException {
@@ -364,7 +344,7 @@ public class RRD4JRrdStrategy implements RrdStrategy<RrdDef,RrdDb> {
         if (array.length > index) {
             return getColor(array[index]);
         }
-        return new Color(1.0f, 1.0f, 1.0f, 0.0f);
+        return RrdGraphConstants.BLIND_COLOR;
     }
 
     /** {@inheritDoc} */
@@ -377,7 +357,7 @@ public class RRD4JRrdStrategy implements RrdStrategy<RrdDef,RrdDb> {
      * {@inheritDoc}
      *
      * This constructs a graphDef by parsing the rrdtool style command and using
-     * the values to create the JRobin graphDef. It does not understand the 'AT
+     * the values to create the RRD4J graphDef. It does not understand the 'AT
      * style' time arguments however. Also there may be some rrdtool parameters
      * that it does not understand. These will be ignored. The graphDef will be
      * used to construct an RrdGraph and a PNG image will be created. An input
@@ -666,7 +646,7 @@ public class RRD4JRrdStrategy implements RrdStrategy<RrdDef,RrdDb> {
 
                 final String absolutePath = (File.separatorChar == '\\')? dsFile.getAbsolutePath().replace("\\", "\\\\") : dsFile.getAbsolutePath();
                 // LOG.debug("absolutePath = {}", absolutePath);
-                if(infos.opts.size() > 1) {
+                if(infos.opts.size() > 0) {
                     RrdDb db;
                     try {
                         db = new RrdDb(dsFile.getCanonicalPath());
@@ -683,27 +663,32 @@ public class RRD4JRrdStrategy implements RrdStrategy<RrdDef,RrdDb> {
                     if(endString == null) {
                         frEnd = new TimeParser(endString).parse().getTimestamp();
                     }
-                    String cfString = infos.opts.get("reduce");
-                    if(cfString == null) {
-                        cfString = infos.args[2];
+                    //Needs to be improved, no way to use it in rrd4j
+                    //String cfString = infos.opts.get("reduce");
+                    //if(cfString == null) {
+                    //    cfString = infos.args[2];
+                    //}
+                    //ConsolFun cf = ConsolFun.valueOf(cfString);
+                    String stepString = infos.opts.get("step");
+                    long frStep = step;
+                    if(stepString == null) {
+                        frStep = this.stringToType(stepString, new Long(step));
                     }
-                    ConsolFun cf = ConsolFun.valueOf(cfString);
+
                     FetchData fd;
                     try {
-                        fd = db.createFetchRequest(cf, frStart, frEnd, step).fetchData();
+                        fd = db.createFetchRequest(ConsolFun.valueOf(infos.args[2]), frStart, frEnd, frStep).fetchData();
                         graphDef.datasource(infos.name, infos.args[1], fd);
                     } catch (IOException e) {
-                        throw new RuntimeException();
+                        throw new RuntimeException(e);
                     }
                     try {
                         db.close();
                     } catch (IOException e) {
-                        throw new RuntimeException();
+                        throw new RuntimeException(e);
                     }
                 }
                 else {
-                    String stepString = infos.opts.get("step");
-
                     graphDef.datasource(infos.name, absolutePath, infos.args[1], ConsolFun.valueOf(infos.args[2]));                    
                 }
                 List<String> defBits = new ArrayList<String>();
@@ -721,16 +706,6 @@ public class RRD4JRrdStrategy implements RrdStrategy<RrdDef,RrdDb> {
                 List<String> cdefBits = new ArrayList<String>();
                 cdefBits.add(infos.args[0]);
                 defs.put(infos.name, cdefBits);
-            } else if (arg.startsWith("LINE1:") || arg.startsWith("LINE2:") || arg.startsWith("LINE3:")) {
-                GraphDefInformations infos = parseGraphDefElement(arg, 2, true);
-                float lineWidth = new Integer(infos.type.substring(4)).floatValue();
-                boolean stack = false;
-                if(infos.opts.containsKey("STACK"))
-                    stack = true;
-                String dashes = infos.opts.get("dashes");
-                String dashOffset = infos.opts.get("dashe-offset");
-                String[] color = tokenize(infos.args[0], "#", true);
-                graphDef.line(color[0], getColorOrInvisible(color, 1), infos.args[1] != null ? infos.args[1] : "", lineWidth, stack);
             } else if (arg.startsWith("GPRINT:") || arg.startsWith("PRINT:") ) {
                 GraphDefInformations infos = parseGraphDefElement(arg, 3, false);
                 String srcName = infos.args[0];
@@ -767,6 +742,16 @@ public class RRD4JRrdStrategy implements RrdStrategy<RrdDef,RrdDb> {
                 String comments[] = tokenize(arg, ":", false);
                 String format = comments[1].replaceAll("\\n", "\\\\l");
                 graphDef.comment(format);
+            } else if (LINEPATTERN.matcher(arg).find()) {
+                GraphDefInformations infos = parseGraphDefElement(arg, 2, true);
+                float lineWidth = stringToType(infos.type.substring(4), Float.NaN).floatValue();
+                boolean stack = false;
+                if(infos.opts.containsKey("STACK"))
+                    stack = true;
+                String dashes = infos.opts.get("dashes");
+                String dashOffset = infos.opts.get("dashe-offset");
+                String[] color = tokenize(infos.args[0], "#", true);
+                graphDef.line(color[0], getColorOrInvisible(color, 1), infos.args[1] != null ? infos.args[1] : "", lineWidth, stack);
             } else if (arg.startsWith("AREA:")) {
                 GraphDefInformations infos = parseGraphDefElement(arg, 2, true);
                 boolean stack = false;
@@ -884,32 +869,9 @@ public class RRD4JRrdStrategy implements RrdStrategy<RrdDef,RrdDb> {
 
         // These are the documented RRD color tags
         try {
-            if (colorTag.equals("BACK")) {
-                graphDef.setColor("BACK", color);
-            }
-            else if (colorTag.equals("CANVAS")) {
-                graphDef.setColor("CANVAS", color);
-            }
-            else if (colorTag.equals("SHADEA")) {
-                graphDef.setColor("SHADEA", color);
-            }
-            else if (colorTag.equals("SHADEB")) {
-                graphDef.setColor("SHADEB", color);
-            }
-            else if (colorTag.equals("GRID")) {
-                graphDef.setColor("GRID", color);
-            }
-            else if (colorTag.equals("MGRID")) {
-                graphDef.setColor("MGRID", color);
-            }
-            else if (colorTag.equals("FONT")) {
-                graphDef.setColor("FONT", color);
-            }
-            else if (colorTag.equals("FRAME")) {
-                graphDef.setColor("FRAME", color);
-            }
-            else if (colorTag.equals("ARROW")) {
-                graphDef.setColor("ARROW", color);
+            
+            if (COLORNAMES.contains(colorTag.toLowerCase())) {
+                graphDef.setColor(colorTag, color);
             }
             else {
                 throw new RuntimeException("Unknown color tag " + colorTag);

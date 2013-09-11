@@ -38,8 +38,8 @@ import org.opennms.netmgt.rrd.RrdException;
 import org.opennms.netmgt.rrd.RrdGraphDetails;
 
 /**
- * Container for details from a JRobin RRD graph.  Stores the same details
- * as RrdGraphDetails, in addition to the JRobin RrdGraph object itself and
+ * Container for details from a RRD4J RRD graph.  Stores the same details
+ * as RrdGraphDetails, in addition to the RRD4J RrdGraph object itself and
  * the graph command String used to generate the graph.  We keep the graph
  * command string around so we can generate a detailed error if
  * getInputStream() is called, but no graph was produced.
@@ -133,7 +133,7 @@ public class RRD4JRrdGraphDetails implements RrdGraphDetails {
 
     private void assertGraphProduced() throws RrdException {
         if (m_rrdGraph.getRrdGraphInfo().getBytes() == null) {
-            String message = "no graph was produced by JRobin for command '" + getGraphCommand() + "'.  Does the command have any drawing commands (e.g.: LINE1, LINE2, LINE3, AREA, STACK, GPRINT)?";
+            String message = "no graph was produced by RRD4J for command '" + getGraphCommand() + "'.  Does the command have any drawing commands (e.g.: LINE1, LINE2, LINE3, AREA, STACK, GPRINT)?";
             LOG.error(message);
             throw new RrdException(message);
         }

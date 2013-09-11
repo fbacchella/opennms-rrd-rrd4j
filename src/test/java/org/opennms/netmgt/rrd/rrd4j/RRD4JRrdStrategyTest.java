@@ -149,7 +149,9 @@ public class RRD4JRrdStrategyTest {
 
         Throwable t = null;
         try {
-        	((RRD4JRrdStrategy)m_strategy).createGraphDef(new File(""), command);
+            RrdGraphDef graphDef = ((RRD4JRrdStrategy)m_strategy).createGraphDef(new File(""), command);
+            @SuppressWarnings("unused")
+            RrdGraph graph = new RrdGraph(graphDef);
         } catch (final RuntimeException e) {
         	t = e;
         }
