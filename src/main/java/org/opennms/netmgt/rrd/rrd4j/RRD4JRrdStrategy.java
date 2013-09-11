@@ -36,6 +36,7 @@ import java.lang.reflect.Constructor;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Calendar;
 import java.util.Collection;
 import java.util.Deque;
 import java.util.HashMap;
@@ -78,7 +79,7 @@ public class RRD4JRrdStrategy implements RrdStrategy<RrdDef,RrdDb> {
     private static final String BACKEND_FACTORY_PROPERTY = "org.rrd4j.core.RrdBackendFactory";
     private static final String DEFAULT_BACKEND_FACTORY = "FILE";
 
-    private final class GraphDefInformations {
+    final class GraphDefInformations {
         String type;
         String name;
         String[] args;
@@ -417,7 +418,19 @@ public class RRD4JRrdStrategy implements RrdStrategy<RrdDef,RrdDb> {
         // no need to do anything since this strategy doesn't queue
     }
 
-    <ArgClass> ArgClass parseStringNumber(String arg, String paramaName, Iterator<String> i, ArgClass defaultVal, String error) {
+    private <ArgClass> ArgClass stringToType(String arg, ArgClass defaultVal) {
+        try {
+            @SuppressWarnings("unchecked")
+            Class<ArgClass> clazz = (Class<ArgClass>) defaultVal.getClass();
+            Constructor<ArgClass> c = clazz.getConstructor(String.class);
+            ArgClass n = c.newInstance(arg);
+            return n;
+        } catch (Exception e) {
+            throw new IllegalArgumentException("can't parse " + arg + " to " + defaultVal.getClass().getSimpleName());
+        }        
+    }
+
+    private <ArgClass> ArgClass parseOptType(String arg, String paramaName, Iterator<String> i, ArgClass defaultVal, String error) {
         if(defaultVal != null) {
             String paramtry = String.format("--%s=", paramaName);
             String paramStringValue = null;
@@ -430,17 +443,8 @@ public class RRD4JRrdStrategy implements RrdStrategy<RrdDef,RrdDb> {
             }
             if(paramStringValue == null) {
                 throw new IllegalArgumentException(error);
-            }                   
-
-            try {
-                @SuppressWarnings("unchecked")
-                Class<ArgClass> clazz = (Class<ArgClass>) defaultVal.getClass();
-                Constructor<ArgClass> c = clazz.getConstructor(String.class);
-                ArgClass n = c.newInstance(paramStringValue);
-                return n;
-            } catch (Exception e) {
-                throw new IllegalArgumentException(error);
             }
+            return stringToType(paramStringValue, defaultVal);
         }
         else {
             if(defaultVal instanceof Boolean && arg.equals("--" + paramaName)) {
@@ -469,23 +473,27 @@ public class RRD4JRrdStrategy implements RrdStrategy<RrdDef,RrdDb> {
     }
 
     GraphDefInformations parseGraphDefElement(String line, int countArgs, boolean isData) {
-        String[] token = line.split(":");
+        String[] token = colonSplit(line);
         GraphDefInformations info = new GraphDefInformations();
         info.type = token[0];
-        info.args = new String[countArgs];
+        info.name = null;
         info.opts = new HashMap<String, String>();
-        for(int i = 1 ; i <= countArgs ; i++) {
-            if( i < token.length) {
-                info.args[i - 1] = token[i];
-            }
-            else {
-                info.args[i - 1] = null;
-            }
-        }
+        info.args = new String[countArgs];
         if(isData) {
-            String[] nametokens = info.args[0].split("=");
+            String[] nametokens = token[1].split("=");
             info.name = nametokens[0];
             info.args[0] = nametokens[1];
+        }
+        else {
+            info.args[0] = token[1];
+        }
+        for(int i = 1 ; i < countArgs ; i++) {
+            if( i  + 1 < token.length) {
+                info.args[i] = token[i + 1];
+            }
+            else {
+                info.args[i] = null;
+            }
         }
 
         for(int i = countArgs + 1; i < token.length; i++) {
@@ -535,79 +543,112 @@ public class RRD4JRrdStrategy implements RrdStrategy<RrdDef,RrdDb> {
             LOG.debug("opt name = {}", optName);
 
             if("start".equals(optName)) {
-                start = parseStringNumber(arg, optName, i, new Long(0), "").longValue();
+                start = parseOptType(arg, optName, i, new Long(0), "").longValue();
             }
             else if("end".equals(optName)) {
-                end = parseStringNumber(arg, optName, i, new Long(0), "").longValue();
+                end = parseOptType(arg, optName, i, new Long(0), "").longValue();
             }
             else if("step".equals(optName)) {
-                step = parseStringNumber(arg, optName, i, new Long(0), "").longValue();
+                step = parseOptType(arg, optName, i, new Long(0), "").longValue();
                 graphDef.setStep(step);
             }
             else if("title".equals(optName)) {
-                String title = parseStringNumber(arg, optName, i, "", "");
+                String title = parseOptType(arg, optName, i, "", "");
                 graphDef.setTitle(title);
             }
             else if("color".equals(optName)) {
-                String color = parseStringNumber(arg, optName, i, "", "--color must be followed by a color");
+                String color = parseOptType(arg, optName, i, "", "--color must be followed by a color");
                 parseGraphColor(graphDef, color);
             }
             else if("vertical-label".equals(optName)) {
-                String vlabel = parseStringNumber(arg, optName, i, "", "--vertical-label must be followed by a label");
+                String vlabel = parseOptType(arg, optName, i, "", "--vertical-label must be followed by a label");
                 graphDef.setVerticalLabel(vlabel);
             }
             else if("height".equals(optName)) {
-                height = parseStringNumber(arg, optName, i, new Integer(0), "--height must be followed by a number").intValue();
+                height = parseOptType(arg, optName, i, new Integer(0), "--height must be followed by a number").intValue();
             }
             else if("width".equals(optName)) {
-                int exponent = parseStringNumber(arg, optName, i, new Integer(0), "--units-exponent must be followed by a number").intValue();
+                int exponent = parseOptType(arg, optName, i, new Integer(0), "--units-exponent must be followed by a number").intValue();
                 graphDef.setUnitsExponent(exponent);
             }
             else if("lower-limit".equals(optName)) {
-                lowerLimit = parseStringNumber(arg, optName, i, new Double(0), "--lower-limit must be followed by a number").doubleValue();
+                lowerLimit = parseOptType(arg, optName, i, new Double(0), "--lower-limit must be followed by a number").doubleValue();
             }
             else if("upper-limit".equals(optName)) {
-                upperLimit = parseStringNumber(arg, optName, i, new Double(0), "--upper-limit must be followed by a number").doubleValue();
+                upperLimit = parseOptType(arg, optName, i, new Double(0), "--upper-limit must be followed by a number").doubleValue();
             }
             else if("base".equals(optName)) {
-                double base = parseStringNumber(arg, optName, i, new Double(0), "--base must be followed by a number").doubleValue();
+                double base = parseOptType(arg, optName, i, new Double(0), "--base must be followed by a number").doubleValue();
                 graphDef.setBase(base);
             }
             else if("logarithmic".equals(optName)) {
-                boolean logarithmic = parseStringNumber(arg, optName, i, Boolean.FALSE, "").booleanValue();
+                boolean logarithmic = parseOptType(arg, optName, i, Boolean.FALSE, "").booleanValue();
                 graphDef.setLogarithmic(logarithmic);
             }
             else if("font".equals(optName)) {
-                String font = parseStringNumber(arg, optName, i, "", "--font must be followed by an argument");
+                String font = parseOptType(arg, optName, i, "", "--font must be followed by an argument");
                 processRrdFontArgument(graphDef, font);
             }
             else if("imgformat".equals(optName)) {
-                String imgformat = parseStringNumber(arg, optName, i, "", "--imgformat must be followed by an argument");
+                String imgformat = parseOptType(arg, optName, i, "", "--imgformat must be followed by an argument");
                 graphDef.setImageFormat(imgformat);
             }
             else if("lazy".equals(optName)) {
-                boolean lazy = parseStringNumber(arg, optName, i, Boolean.FALSE, "").booleanValue();
+                boolean lazy = parseOptType(arg, optName, i, Boolean.FALSE, "").booleanValue();
                 graphDef.setLazy(lazy);
             }
             else if("rigid".equals(optName)) {
-                rigid = parseStringNumber(arg, optName, i, Boolean.FALSE, "").booleanValue();
+                rigid = parseOptType(arg, optName, i, Boolean.FALSE, "").booleanValue();
             }
             else if("no-legend".equals(optName)) {
-                boolean noLegend = parseStringNumber(arg, optName, i, Boolean.FALSE, "").booleanValue();
+                boolean noLegend = parseOptType(arg, optName, i, Boolean.FALSE, "").booleanValue();
                 graphDef.setNoLegend(noLegend);
             }
             else if("alt-autoscale".equals(optName)) {
-                boolean altAutoscale = parseStringNumber(arg, optName, i, Boolean.FALSE, "").booleanValue();
+                boolean altAutoscale = parseOptType(arg, optName, i, Boolean.FALSE, "").booleanValue();
                 graphDef.setAltAutoscale(altAutoscale);
             }
             else if("alt-autoscale-max".equals(optName)) {
-                boolean altAutoscaleMax = parseStringNumber(arg, optName, i, Boolean.FALSE, "").booleanValue();
+                boolean altAutoscaleMax = parseOptType(arg, optName, i, Boolean.FALSE, "").booleanValue();
                 graphDef.setAltAutoscaleMax(altAutoscaleMax);
             }
+            else if("alt-autoscale-min".equals(optName)) {
+                boolean altAutoscaleMin = parseOptType(arg, optName, i, Boolean.FALSE, "").booleanValue();
+                graphDef.setAltAutoscaleMax(altAutoscaleMin);
+            }
             else if("alt-y-grid".equals(optName)) {
-                boolean altYGrid = parseStringNumber(arg, optName, i, Boolean.FALSE, "").booleanValue();
+                boolean altYGrid = parseOptType(arg, optName, i, Boolean.FALSE, "").booleanValue();
                 graphDef.setAltYGrid(altYGrid);
             }
+            else if("units-length".equals(optName)) {
+                int value = parseOptType(arg, optName, i, new Integer(0), "--units-length must be followed by a number").intValue();
+                graphDef.setUnitsLength(value);
+            }
+            else if("units".equals(optName)) {
+                String units = parseOptType(arg, optName, i, "", "--units must be followed by a unit for the SI (k, M)");
+                graphDef.setUnit(units);
+            }
+            else if("x-grid".equals(optName)) {
+                String xGrid = parseOptType(arg, optName, i, "", "--x-grid must be followed by an argument");
+                parseXGrid(graphDef, xGrid);
+            }
+            else if("y-grid".equals(optName)) {
+                String yGrid = parseOptType(arg, optName, i, "", "--y-grid must be followed by an argument");
+                parseYGrid(graphDef, yGrid);
+            }
+            //no-gridfit
+            //
+
+            // right-axis
+            // right-axis-format
+            // 
+            // force-rules-legend
+            // legend-direction
+            // imginfo
+            // grid-dash
+            // border
+            // dynamic-labels
+            // zoom
             else if(arg.startsWith("DEF:")) {
                 GraphDefInformations infos = parseGraphDefElement(arg, 3, true);
                 // LOG.debug("ds = {}", Arrays.toString(ds));
@@ -690,10 +731,13 @@ public class RRD4JRrdStrategy implements RrdStrategy<RrdDef,RrdDb> {
                 String dashOffset = infos.opts.get("dashe-offset");
                 String[] color = tokenize(infos.args[0], "#", true);
                 graphDef.line(color[0], getColorOrInvisible(color, 1), infos.args[1] != null ? infos.args[1] : "", lineWidth, stack);
-            } else if (arg.startsWith("GPRINT:")) {
-                GraphDefInformations infos = parseGraphDefElement(arg, 3, true);
+            } else if (arg.startsWith("GPRINT:") || arg.startsWith("PRINT:") ) {
+                GraphDefInformations infos = parseGraphDefElement(arg, 3, false);
+                String srcName = infos.args[0];
                 String format;
+                ConsolFun cf = null;
                 if(infos.args[2] != null) {
+                    cf = ConsolFun.valueOf(infos.args[1]);
                     format = infos.args[2];
                 }
                 else {
@@ -704,21 +748,23 @@ public class RRD4JRrdStrategy implements RrdStrategy<RrdDef,RrdDb> {
                 format = format.replaceAll("%%", "%");
                 //LOG.debug("gprint: oldformat = {} newformat = {}", gprint[2], format);
                 format = format.replaceAll("\\n", "\\\\l");
-                graphDef.gprint(infos.name, ConsolFun.valueOf(gprint[1]), format);
-
-            } else if (arg.startsWith("PRINT:")) {
-                String definition = arg.substring("PRINT:".length());
-                String print[] = tokenize(definition, ":", true);
-                String format = print[2];
-                //format = format.replaceAll("%(\\d*\\.\\d*)lf", "@$1");
-                //format = format.replaceAll("%s", "@s");
-                //format = format.replaceAll("%%", "%");
-                //LOG.debug("gprint: oldformat = {} newformat = {}", print[2], format);
-                format = format.replaceAll("\\n", "\\\\l");
-                graphDef.print(print[0], ConsolFun.valueOf(print[1]).getVariable(), format);
-
+                if(cf != null) {
+                    if("GPRINT".equals(infos.type)) {
+                        graphDef.gprint(srcName, cf, format);                                            
+                    }
+                    else {
+                        graphDef.print(srcName, cf, format);                    
+                    }
+                } else {
+                    if("GPRINT".equals(infos.type)) {
+                        graphDef.gprint(srcName, format);                    
+                    }
+                    else {
+                        graphDef.print(srcName, format);                    
+                    }
+                }
             } else if (arg.startsWith("COMMENT:")) {
-                String comments[] = tokenize(arg, ":", true);
+                String comments[] = tokenize(arg, ":", false);
                 String format = comments[1].replaceAll("\\n", "\\\\l");
                 graphDef.comment(format);
             } else if (arg.startsWith("AREA:")) {
@@ -744,22 +790,6 @@ public class RRD4JRrdStrategy implements RrdStrategy<RrdDef,RrdDb> {
             } else {
                 LOG.warn("RRD4J: Unrecognized graph argument: {}", arg);
             }
-            // units-length
-            // units
-            //alt-autoscale-min
-            //no-gridfit
-            //x-grid
-            //y-grid
-            // right-axis
-            // right-axis-format
-            // 
-            // force-rules-legend
-            // legend-direction
-            // imginfo
-            // grid-dash
-            // border
-            // dynamic-labels
-            // zoom
 
         }
 
@@ -784,7 +814,7 @@ public class RRD4JRrdStrategy implements RrdStrategy<RrdDef,RrdDb> {
             // LOG.debug("windows");
             // Windows, make sure the beginning isn't eg: C:\\foo\\bar
             if (definition.matches("[^=]*=[a-zA-Z]:.*")) {
-                final String[] tempDef = definition.split("(?<!\\\\):");
+                final String[] tempDef = colonSplit(definition);
                 def = new String[tempDef.length - 1];
                 def[0] = tempDef[0] + ':' + tempDef[1];
                 if (tempDef.length > 2) {
@@ -794,10 +824,10 @@ public class RRD4JRrdStrategy implements RrdStrategy<RrdDef,RrdDb> {
                 }
             } else {
                 // LOG.debug("no match");
-                def = definition.split("(?<!\\\\):");
+                def = colonSplit(definition);
             }
         } else {
-            def = definition.split("(?<!\\\\):");
+            def = colonSplit(definition);
         }
         // LOG.debug("returning: {}", Arrays.toString(def));
         return def;
@@ -1074,5 +1104,81 @@ public class RRD4JRrdStrategy implements RrdStrategy<RrdDef,RrdDb> {
             graphDef.datasource(sourceName, rhs[0], var);
         }
     }
+
+    private void parseYGrid(RrdGraphDef graphDef, String gridString) {
+        if ( gridString.equalsIgnoreCase("none") ) {
+            graphDef.setDrawYGrid(false);
+            return;
+        }
+        String[] tokens = colonSplit(gridString);
+        if (tokens.length != 2) {
+            throw new IllegalArgumentException("Invalid YGRID settings: " + gridString);
+        }
+        double gridStep = stringToType(tokens[0], Double.NaN);
+        int labelFactor = stringToType(tokens[1], Integer.MIN_VALUE);
+    }
+
+    private void parseXGrid(RrdGraphDef graphDef, String gridString) {
+        if ( gridString.equalsIgnoreCase("none") ) {
+            graphDef.setDrawXGrid(false);
+            return;
+        }
+        String[] tokens = colonSplit(gridString);
+        if (tokens.length != 8) {
+            throw new IllegalArgumentException("Invalid XGRID settings: " + gridString);
+        }
+        int minorUnit = resolveUnit(tokens[0]);
+        int majorUnit = resolveUnit(tokens[2]);
+        int labelUnit = resolveUnit(tokens[4]);
+        int minorUnitCount = stringToType(tokens[1], Integer.MIN_VALUE);
+        int majorUnitCount = stringToType(tokens[3], Integer.MIN_VALUE);
+        int labelUnitCount = stringToType(tokens[5], Integer.MIN_VALUE);
+        int labelSpan = stringToType(tokens[6], Integer.MIN_VALUE);
+        String fmt = tokens[7];
+        graphDef.setTimeAxis(minorUnit, minorUnitCount, majorUnit, majorUnitCount,
+                             labelUnit, labelUnitCount, labelSpan, fmt);
+    }
+
+    private int resolveUnit(String unitName) {
+        final String[] unitNames = {"SECOND", "MINUTE", "HOUR", "DAY", "WEEK", "MONTH", "YEAR"};
+        final int[] units = {Calendar.SECOND, Calendar.MINUTE, Calendar.HOUR, Calendar.DAY_OF_MONTH, Calendar.WEEK_OF_YEAR, Calendar.MONTH, Calendar.YEAR};
+        for (int i = 0; i < unitNames.length; i++) {
+            if (unitName.equalsIgnoreCase(unitNames[i])) {
+                return units[i];
+            }
+        }
+        throw new IllegalArgumentException("Unknown time unit specified: " + unitName);
+    }
+
+    private String[] colonSplit(String cmd) {
+        // or String[] tempDef = definition.split("(?<!\\\\):");
+        int cmdLength = cmd.length();
+        char[] content = cmd.toCharArray();
+        int[] poses = new int[cmdLength];
+        int pos = 0;
+        poses[0] = 0;
+        for( int i = 0; i < cmdLength ; i++) {
+            if(content[i] == '\\') {
+                i++;
+            }
+            else if(content[i] == ':'){
+                poses[++pos] = i + 1;
+            }
+        }
+        poses[++pos] = cmdLength;
+        String[] tokens = new String[pos];
+        for( int i = 0 ; i < pos - 1; i++) {
+            tokens[i] = new String(content, poses[i], poses[ i + 1] - poses[i] - 1);
+        }
+        //Last token
+        if(poses[pos - 1] == cmdLength) {
+            tokens[pos - 1] = "";
+        }
+        else {
+            tokens[pos - 1] = new String(content, poses[pos - 1], poses[pos] - poses[pos - 1]);
+        }
+        return tokens;
+    }
+
 
 }

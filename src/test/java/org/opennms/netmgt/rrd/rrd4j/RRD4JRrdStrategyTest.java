@@ -31,6 +31,7 @@ package org.opennms.netmgt.rrd.rrd4j;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 import java.io.File;
@@ -55,6 +56,7 @@ import org.opennms.netmgt.rrd.RrdGraphDetails;
 import org.opennms.netmgt.rrd.RrdStrategy;
 import org.opennms.netmgt.rrd.RrdUtils;
 import org.opennms.netmgt.rrd.rrd4j.RRD4JRrdStrategy;
+import org.opennms.netmgt.rrd.rrd4j.RRD4JRrdStrategy.GraphDefInformations;
 import org.opennms.test.FileAnticipator;
 import org.opennms.test.ThrowableAnticipator;
 import org.opennms.test.mock.MockUtil;
@@ -152,6 +154,7 @@ public class RRD4JRrdStrategyTest {
         	t = e;
         }
         assertNotNull(t);
+        t.printStackTrace();
         
     	assertTrue("message was " + t.getMessage(), t.getMessage().contains("Could not open "));
     	assertTrue("message was " + t.getMessage(), t.getMessage().contains("fe80:0000:0000:0000:0000:0000:0000:0000%5"));
@@ -233,11 +236,11 @@ public class RRD4JRrdStrategyTest {
                 "VDEF:max=baz,MAX",
                 "VDEF:tot=baz,TOTAL",
                 "VDEF:nfp=baz,95,PERCENT",
-                "PRINT:avg:AVERAGE:\"%le\"",
-                "PRINT:min:AVERAGE:\"%le\"",
-                "PRINT:max:AVERAGE:\"%le\"",
-                "PRINT:tot:AVERAGE:\"%le\"",
-                "PRINT:nfp:AVERAGE:\"%le\""
+                "PRINT:avg:AVERAGE:%le",
+                "PRINT:min:AVERAGE:%le",
+                "PRINT:max:AVERAGE:%le",
+                "PRINT:tot:AVERAGE:%le",
+                "PRINT:nfp:AVERAGE:%le"
         };
         graphDef = ((RRD4JRrdStrategy)m_strategy).createGraphDef(new File(""), command);
         graph = new RrdGraph(graphDef);
@@ -380,15 +383,15 @@ public class RRD4JRrdStrategyTest {
                 "--start=" + start,
                 "--end=" + end,
                 "CDEF:a=1",
-                "GPRINT:a:AVERAGE:\"%8.2lf\\n\""
+                "GPRINT:a:AVERAGE:\"%8.2lf\n\""
         };
         String[] command2 = new String[] {
                 "--start=" + start,
                 "--end=" + end,
                 "CDEF:a=1",
                 "CDEF:b=1",
-                "GPRINT:a:AVERAGE:\"%8.2lf\\n\"",
-                "GPRINT:b:AVERAGE:\"%8.2lf\\n\""
+                "GPRINT:a:AVERAGE:\"%8.2lf\n\"",
+                "GPRINT:b:AVERAGE:\"%8.2lf\n\""
         };
 
         RrdGraphDef graphDef = ((RRD4JRrdStrategy)m_strategy).createGraphDef(new File(""), command);
@@ -402,6 +405,9 @@ public class RRD4JRrdStrategyTest {
         assertNotNull("second graph object", graph2);
         
         int secondHeight = graph2.getRrdGraphInfo().getHeight();
+        
+        System.out.println(Arrays.toString(graph.getRrdGraphInfo().getPrintLines()));
+        System.out.println(Arrays.toString(graph2.getRrdGraphInfo().getPrintLines()));
 
         assertFalse("first graph height " + firstHeight + " and second graph height " + secondHeight + " should not be equal... there should be another line with a newline in the second one making it taller", firstHeight == secondHeight);
     }
@@ -427,9 +433,7 @@ public class RRD4JRrdStrategyTest {
         String[] printLines = info.getPrintLines();
         assertNotNull("graph printLines", printLines);
         assertEquals("graph printLines size", 1, printLines.length);
-        assertEquals("graph printLines item 0", "1.000000e+00", printLines[0]);
-        double d = Double.parseDouble(printLines[0]);
-        assertEquals("graph printLines item 0 as a double", 1.0, d, 0.0);
+        assertEquals("graph printLines item 0", "\"1.000000e+00\"", printLines[0]);
     }
     
 
@@ -450,9 +454,7 @@ public class RRD4JRrdStrategyTest {
         String[] printLines = graphDetails.getPrintLines();
         assertNotNull("graph printLines", printLines);
         assertEquals("graph printLines size", 1, printLines.length);
-        assertEquals("graph printLines item 0", "1.000000e+00", printLines[0]);
-        double d = Double.parseDouble(printLines[0]);
-        assertEquals("graph printLines item 0 as a double", 1.0, d, 0.0);
+        assertEquals("graph printLines item 0", "\"1.000000e+00\"", printLines[0]);
     }
     
     @Test
@@ -490,7 +492,45 @@ public class RRD4JRrdStrategyTest {
     	assertEquals(Arrays.asList(expected), Arrays.asList(actual));
     }
 
-    public File createRrdFile() throws Exception {
+    @Test
+    public void parseDEF() {
+        GraphDefInformations infos = ((RRD4JRrdStrategy)m_strategy).parseGraphDefElement("DEF:baz=/test.jrb:bar:AVERAGE", 3, true);
+        assertEquals("DEF", infos.type);
+        assertEquals("baz", infos.name);
+        assertEquals("/test.jrb", infos.args[0]);
+        assertEquals("bar", infos.args[1]);
+        assertEquals("AVERAGE", infos.args[2]);
+    }
+
+    @Test
+    public void parseVDEF() {
+        GraphDefInformations infos = ((RRD4JRrdStrategy)m_strategy).parseGraphDefElement("VDEF:nfp=baz,95,PERCENT", 1, true);
+        assertEquals("VDEF", infos.type);
+        assertEquals("nfp", infos.name);
+        assertEquals("baz,95,PERCENT", infos.args[0]);
+    }
+
+    @Test
+    public void parsePRINT1() {
+        GraphDefInformations infos = ((RRD4JRrdStrategy)m_strategy).parseGraphDefElement("PRINT:nfp:AVERAGE:\"%le\"", 3, false);
+        assertEquals("PRINT", infos.type);
+        assertNull(infos.name);
+        assertEquals("nfp", infos.args[0]);
+        assertEquals("AVERAGE", infos.args[1]);
+        assertEquals("\"%le\"", infos.args[2]);
+    }
+
+    @Test
+    public void parsePRINT2() {
+        GraphDefInformations infos = ((RRD4JRrdStrategy)m_strategy).parseGraphDefElement("PRINT:nfp:\"%le\"", 3, false);
+        assertEquals("PRINT", infos.type);
+        assertNull(infos.name);
+        assertEquals("nfp", infos.args[0]);
+        assertEquals("\"%le\"", infos.args[1]);
+        assertNull(infos.args[2]);
+    }
+
+   public File createRrdFile() throws Exception {
         String rrdFileBase = "foo";
 
         m_fileAnticipator.initialize();
